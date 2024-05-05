@@ -161,6 +161,25 @@ class sources(BrowserBase):
         all_results = list(map(mapfunc, cache_list))
         return all_results
 
+    def get_sources(self, query, anilist_id, episode, status, media_type, rescrape):
+        query = str(query) + control.getSetting("torrent.query.data")
+        query = self._clean_title(query)
+
+        if media_type == 'movie':
+            return self._get_movie_sources(query, anilist_id, episode)
+
+        sources = self._get_episode_sources(query, anilist_id, episode, status, rescrape)
+
+        if not sources and ':' in query:
+            q1, q2 = (q.split(':')[0] for q in query[1:-1].split('|'))
+            query2 = f"({q1})|({q2})"
+            sources = self._get_episode_sources(query2, anilist_id, episode, status, rescrape)
+
+        if not sources:
+            sources = self._get_episode_sources_backup(query, anilist_id, episode)
+
+        return sources
+
     def _get_episode_sources(self, show, anilist_id, episode, status, rescrape):
         if rescrape:
             return self._get_episode_sources_pack(show, anilist_id, episode)
