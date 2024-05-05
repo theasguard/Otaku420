@@ -1,4 +1,5 @@
 import urllib.parse
+import json
     def _get_episode_sources(self, show, anilist_id, episode, status, rescrape):
         if rescrape:
             return self._get_episode_sources_pack(show, anilist_id, episode)
@@ -66,3 +67,40 @@ import urllib.parse
     
         # Process the nyaa.si backup with the constructed URL
         return self._process_nyaa_backup(url, anilist_id, 2, episode.zfill(2), True)
+
+    def _get_movie_sources(self, query, anilist_id, episode):
+        # Encode the query
+        query = urllib.parse.quote_plus(query)
+        
+        # Construct the URL with the encoded query
+        url = f'{self._BASE_URL}?f=0&c=1_2&q={query}&s=downloads&o=desc'
+        
+        # Process nyaa.si movie sources
+        sources = self._process_nyaa_movie(url, '1')
+    
+        # If no sources found, try getting from backup
+        if not sources:
+            sources = self._get_movie_sources_backup(anilist_id)
+    
+        return sources
+    
+    def _get_movie_sources_backup(self, anilist_id, episode='1'):
+        # Retrieve show information
+        show = self._get_request(f"https://kimetsu-title.firebaseio.com/{anilist_id}.json")
+        show = json.loads(show)
+        
+        # If show information is not available, return empty list
+        if not show:
+            return []
+    
+        # Extract query from show information
+        if 'general_title' in show:
+            query = urllib.parse.quote_plus(show['general_title'])
+        else:
+            query = urllib.parse.quote_plus(show)
+    
+        # Construct the URL with the encoded query
+        url = f'{self._BASE_URL}?f=0&c=1_2&q={query}&s=downloads&o=desc'
+        
+        # Process nyaa.si backup movie sources
+        return self._process_nyaa_backup(url, episode)
