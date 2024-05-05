@@ -42,3 +42,27 @@ import urllib.parse
         
         # Process the nyaa.si episodes using the constructed URL
         return self._process_nyaa_episodes(url, episode.zfill(2), season)
+
+
+    def _get_episode_sources_pack(self, show, anilist_id, episode):
+        # Construct the base query with "Batch" and "Complete Series"
+        query = f'{show} "Batch"|"Complete Series"'
+    
+        # Retrieve episode information from Kodi metadata
+        episodes = pickle.loads(database.get_show(anilist_id)['kodi_meta'])['episodes']
+        if episodes:
+            # Append queries for individual episodes if available
+            query += f'|"01-{episodes}"|"01~{episodes}"|"01 - {episodes}"|"01 ~ {episodes}"'
+    
+        # Retrieve season information
+        season = database.get_season_list(anilist_id)
+        if season:
+            # Append queries for seasons if available
+            season = season['season']
+            query += f'|"S{season}"|"Season {season}"'
+    
+        # Construct the URL with the base query
+        url = f'{self._BASE_URL}?f=0&c=1_2&q={urllib.parse.quote_plus(query)}&s=seeders&o=desc'
+    
+        # Process the nyaa.si backup with the constructed URL
+        return self._process_nyaa_backup(url, anilist_id, 2, episode.zfill(2), True)
