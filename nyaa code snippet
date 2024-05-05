@@ -10,25 +10,35 @@ import urllib.parse
         except ValueError:
             pass
         
+        # Construct the base query with the show and episode information
         query = f'{show} "- {episode.zfill(2)}"'
+        
+        # Retrieve season information
         season = database.get_season_list(anilist_id)
         if season:
             season = str(season['season']).zfill(2)
             query += f'|"S{season}E{episode.zfill(2)}"'
         
+        # Construct the URL with the base query
         url = f'{self._BASE_URL}?f=0&c=1_0&q={urllib.parse.quote_plus(query)}&s=downloads&o=desc'
         
+        # Check if the status is 'FINISHED'
         if status == 'FINISHED':
+            # Construct additional queries for 'Batch' and 'Complete Series' if available
             query = f'{show} "Batch"|"Complete Series"'
             episodes = pickle.loads(database.get_show(anilist_id)['kodi_meta'])['episodes']
             if episodes:
                 query += f'|"01-{episodes}"|"01~{episodes}"|"01 - {episodes}"|"01 ~ {episodes}"'
         
+            # Append season information if available
             if season:
                 query += f'|"S{season}"|"Season {season}"'
                 query += f'|"S{season}E{episode.zfill(2)}"'
         
+            # Append episode information
             query += f'|"- {episode.zfill(2)}"'
-            url = f'{self._BASE_URL}?f=0&c=1_0&q={urllib.parse.quote_plus(query)}&s=seeders&&o=desc'
+            # Construct the URL with the updated query for 'FINISHED' status
+            url = f'{self._BASE_URL}?f=0&c=1_0&q={urllib.parse.quote_plus(query)}&s=seeders&o=desc'
         
+        # Process the nyaa.si episodes using the constructed URL
         return self._process_nyaa_episodes(url, episode.zfill(2), season)
