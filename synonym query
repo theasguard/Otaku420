@@ -1,0 +1,32 @@
+import json
+import requests
+
+    # Initialize query as an empty string
+    query = ""
+    
+    # URL for the Find My Anime API
+    api_url = "https://find-my-anime.dtimur.de/api?id={}&provider=Anilist".format(anilist_id)
+    
+    try:
+        # Make the API request
+        response = requests.get(api_url)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+    
+        # Parse the JSON response
+        data = response.json()
+    
+        # Get the synonyms using list comprehension
+        synonyms = [synonym for synonym in data[0].get('synonyms', [])]
+    
+        # Build the query
+        query = " | ".join(["(" + synonym + ")" for synonym in synonyms])
+    
+        # Clean the query
+        control.setSetting("torrent.query.data", str(query))
+        
+    except requests.exceptions.RequestException as e:
+        # Handle request exceptions
+        print("Error:", e)
+    except (IndexError, KeyError):
+        # Handle invalid response or missing data
+        print("Invalid response from the API")
