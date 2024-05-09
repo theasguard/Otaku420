@@ -32,13 +32,9 @@ def _get_episode_sources_pack(self, show, anilist_id, episode):
         query += '|"%s"' % season_list
 
     regex = r'\b(?:s|season|series)\s*(\d+)\b(?:episode|ep|eps)\s*(\d+)'
-    regex_ep = r'\b(?:e|ep|eps|episode)\s*(\d{1,4})\b'
-    regex_ep_range = r'\s(?:\d+(?:[-~]\d+)?)(?:-(?:\d+(?:[-~]\d+)?))?'
     regex_season = r'\b(?:s|season|series)\s*(\d+)\b'
     regex_title = r'^r'(.+)'
     rex = re.compile(regex)
-    rex_ep = re.compile(regex_ep)
-    rex_ep_range = re.compile(regex_ep_range)
     rex_season = re.compile(regex_season)
     rex_title = re.compile(regex_title)
 
