@@ -1,3 +1,16 @@
+import itertools
+import json
+import pickle
+import re
+import six
+
+from functools import partial
+from bs4 import BeautifulSoup, SoupStrainer
+from resources.lib import debrid
+from resources.lib.ui import control, database, source_utils
+from resources.lib.ui.BrowserBase import BrowserBase
+from six.moves import urllib_parse
+
 def _get_episode_sources_pack(self, show, anilist_id, episode):
     query = '%s "Batch"|"Complete Series"' % show
 
