@@ -1,0 +1,6 @@
+More Exciting News: We are almost there to 0.5.0
+
+Hey everyone, just a quick few updates. We have recoded the prioritization system to help filter sources better and we also managed to improved nyaa scraping significantly by 3 times as much thanks to theasguard and gujal. For more details, please refer to our latest changelog. We hope you enjoy our latest update.
+
+In the future, we will be implementing a Download Manager and local File Scrapping very soon soon.
+Thank you
