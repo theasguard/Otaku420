@@ -1,3 +1,4 @@
+    def get_syns(self, query, anilist_id):
         query = ""
 
         try:
