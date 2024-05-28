@@ -17,7 +17,17 @@ import logging
 
 logging.basicConfig(level=logging.DEBUG)
 
-# ... (Your existing headers code)
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Android SDK built for x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Mobile Safari/537.36',  # mobile User-Agent string
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3',
+    'Accept-Encoding': 'gzip, deflate, br',  # added gzip and deflate
+    'Accept-Language': 'en-US,en;q=0.8',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',  # added this header
+    'DNT': '1',  # added this header
+    'Proxy-Connection': 'keep-alive',  # added proxy connection header
+}
 
 class sources(BrowserBase):
     _BASE_URL = 'https://anidex.info'
@@ -39,8 +49,33 @@ class sources(BrowserBase):
         return source
 
     def get_sources(self, query, anilist_id, episode, status, media_type, rescrape):
-        # ... (Your existing code for show, query, anidb) 
+        show = database.get_show(anilist_id)
+        kodi_meta = pickle.loads(show.get('kodi_meta'))
 
+        query = kodi_meta.get('ename') or kodi_meta.get('name')
+        query = self._clean_title(query)
+        show_meta = database.get_show_meta(anilist_id)
+
+        if rescrape:
+            # todo add rescrape stuff here
+            pass
+            # todo
+        if media_type != "movie":
+            season = database.get_season_list(anilist_id)['season']
+            season = str(season).zfill(2)
+            query_template = "{title} - S{season}E{episode}"
+            query = query_template.format(title=query, season=season, episode=episode.zfill(2))
+        else:
+            query_template = "{title} - {episode}"
+            query = query_template.format(title=query, episode=episode.zfill(2))
+
+        anidb = database.get_anidb_id(anilist_id)
+        if anidb is None and show_meta:
+            meta_ids = pickle.loads(show_meta['meta_ids'])
+            anidb = meta_ids.get('anidb')
+
+        # Generate the URL with the content type IDs, this case Anime
+        content_type_ids = '1,2,3'
         url = '%s/?q=%s&id=%s' % (self._BASE_URL, urllib_parse.quote_plus(query), content_type_ids)
 
         html = client.request(url, headers=headers, timeout=70)
