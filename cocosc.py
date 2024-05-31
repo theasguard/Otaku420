@@ -8,7 +8,7 @@ from resources.lib.pages import nyaa, animetosho, anidex, animeland, animixplay,
     local_localfiles
 from resources.lib.ui import control
 from resources.lib.windows.get_sources_window import GetSources as DisplayWindow
-from resources.lib.common import logger, tools
+from resources.lib.common import logger
 
 # CocoScrapers Imports
 from cocoscrapers.sources_cocoscrapers import SourcesCocoScrapers
