@@ -1,113 +1,262 @@
 import threading
 import time
-import xbmcaddon
 
-from resources.lib.common import logger, tools
+from resources.lib.pages import nyaa, animetosho, anidex, animeland, animixplay, debrid_cloudfiles, \
+    aniwave, gogoanime, gogohd, animepahe, hianime, animess, animelatino, animecat, aniplay, \
+    local_localfiles
+from resources.lib.ui import control
 from resources.lib.windows.get_sources_window import GetSources as DisplayWindow
 
-#CocoScrapers Imports
-from cocoscrapers.sources_cocoscrapers import SourcesCocoScrapers
+# CocoScrapers Imports
+from cocoscrapers import sources_cocoscrapers
 
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 class CancelProcess(Exception):
     pass
 
 
 def getSourcesHelper(actionArgs):
-    sources = Sources(actionArgs=actionArgs).doModal()
-    del sources
+    if control.getSetting('general.dialog') == '4':
+        sources_window = Sources(*('get_sources_az.xml', control.ADDON_PATH),
+                                 actionArgs=actionArgs)
+    else:
+        sources_window = Sources(*('get_sources.xml', control.ADDON_PATH),
+                                 actionArgs=actionArgs)
+
+    sources = sources_window.doModal()
+    try:
+        del sources_window
+    except:
+        pass
     return sources
 
-# coco_provider 
 COCO_PROVIDER = 'CocoScrapers'
 
 class Sources(DisplayWindow):
     def __init__(self, xml_file, location, actionArgs=None):
-        super(Sources, self).__init__(xml_file, location, actionArgs)
 
+        try:
+            super(Sources, self).__init__(xml_file, location, actionArgs)
+        except:
+            self.args = actionArgs
+            self.canceled = False
+
+        self.torrent_threads = []
+        self.hoster_threads = []
+        self.torrentProviders = []
+        self.hosterProviders = []
+        self.language = 'en'
+        self.torrentCacheSources = []
+        self.embedSources = []
+        self.hosterSources = []
+        self.cloud_files = []
+        self.local_files = []
+        self.remainingProviders = [
+            'nyaa', 'animetosho', 'anidex', 'animeland', 'aniwave', 'gogo', 'gogohd', 'animix',
+            'animepahe', 'h!anime', 'otakuanimes', 'animelatino',
+            'nekosama', 'aniplay', 'Local Inspection', 'Cloud Inspection'
+        ]
+        self.allTorrents = {}
+        self.allTorrents_len = 0
+        self.hosterDomains = {}
+        self.torrents_qual_len = [0, 0, 0, 0]
+        self.hosters_qual_len = [0, 0, 0, 0]
+        self.trakt_id = ''
+        self.silent = False
+        self.return_data = (None, None, None)
+        self.basic_windows = True
+        self.progress = 1
+        self.duplicates_amount = 0
+        self.domain_list = []
+        self.display_style = 0
+        self.background_dialog = None
+        self.running_providers = []
+
+        self.line1 = ''
+        self.line2 = ''
+        self.line3 = ''
+
+        self.host_domains = []
+        self.host_names = []
+
+        self.remainingSources = ['1', '2', '3']
+        self.nyaaSources = []
+        self.animetoshoSources = []
+        self.animelandSources = []
+        self.anidexSources = []
+        self.gogoSources = []
+        self.gogohdSources = []
+        self.aniwaveSources = []
+        self.animixplaySources = []
+        self.animepaheSources = []
+        self.hianimeSources = []
+        self.animessSources = []
+        self.animelatinoSources = []
+        self.animecatSources = []
+        self.aniplaySources = []
         self.threads = []
-        self.language = g.get_language_code()
+        self.usercloudSources = []
+        self.userlocalSources = []
+        self.terminate_on_cloud = control.getSetting('general.terminate.oncloud') == 'true'
+        self.terminate_on_local = control.getSetting('general.terminate.onlocal') == 'true'
         self.torrent_results = []  # Collect CocoScrapers torrent results
         self.hoster_results = []  # Collect CocoScrapers hoster results
-        self.remainingProviders = ['CocoScrapers']  # For progress monitoring
-        self.terminate_on_source = control.getsetting('general.terminate.onsource')
+        self.cocoscrapers_sources = []
+        self.remainingProviders.append(COCO_PROVIDER)
+        self.terminate_on_source = control.getSetting('general.terminate.onsource')
 
-        # ... other init code  ...
 
     def getSources(self, args):
-        # ... (Argument fetching code remains the same) ...
+        query = args['query']
+        anilist_id = args['anilist_id']
+        episode = args['episode']
+        status = args['status']
+        filter_lang = args['filter_lang']
+        media_type = args['media_type']
+        rescrape = args['rescrape']
+        get_backup = args['get_backup']
+        self.setProperty('process_started', 'true')
+        duration = args['duration']
 
+        # Start CocoScrapers if enabled
         if control.getSetting('provider.cocoscrapers') == 'true':
             self.threads.append(
-                threading.Thread(target=self._cocoscrapers_worker, 
+                threading.Thread(target=self._cocoscrapers_worker,
                                  args=(query, anilist_id, episode, media_type, rescrape, get_backup))
             )
         else:
-            self.remainingProviders.remove(COCO_PROVIDER)
+            self.remainingProviders.remove(COCO_PROVIDER) 
 
-        # ... start other providers (local providers from Otaku) ... 
+        if control.real_debrid_enabled() or control.all_debrid_enabled() or control.debrid_link_enabled() or control.premiumize_enabled():
+            if control.getSetting('provider.nyaa') == 'true':
+                self.threads.append(
+                    threading.Thread(target=self.nyaa_worker, args=(query, anilist_id, episode, status, media_type, rescrape)))
+            else:
+                self.remainingProviders.remove('nyaa')
+
+            if control.getSetting('provider.animetosho') == 'true':
+                self.threads.append(
+                    threading.Thread(target=self.animetosho_worker, args=(query, anilist_id, episode, status, media_type, rescrape)))
+            else:
+                self.remainingProviders.remove('animetosho')
+
+            if control.getSetting('provider.anidex') == 'true':
+                self.threads.append(
+                    threading.Thread(target=self.anidex_worker, args=(query, anilist_id, episode, status, media_type, rescrape)))
+            else:
+                self.remainingProviders.remove('anidex')
+
+        else:
+            self.remainingProviders.remove('nyaa')
+            self.remainingProviders.remove('animetosho')
+            self.remainingProviders.remove('anidex')
+
+        if control.getSetting('provider.animeland') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.animeland_worker, args=(anilist_id, episode, get_backup, rescrape)))
+        else:
+            self.remainingProviders.remove('animeland')
+
+        if control.getSetting('provider.gogohd') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.gogohd_worker, args=(anilist_id, episode, get_backup, rescrape)))
+        else:
+            self.remainingProviders.remove('gogohd')
+
+        if control.getSetting('provider.gogo') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.gogo_worker, args=(anilist_id, episode, get_backup, rescrape)))
+        else:
+            self.remainingProviders.remove('gogo')
+
+        if control.getSetting('provider.aniwave') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.aniwave_worker, args=(anilist_id, episode, get_backup, rescrape)))
+        else:
+            self.remainingProviders.remove('aniwave')
+
+        if control.getSetting('provider.animix') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.animixplay_worker, args=(anilist_id, episode, get_backup, rescrape,)))
+        else:
+            self.remainingProviders.remove('animix')
+
+        if control.getSetting('provider.animepahe') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.animepahe_worker, args=(anilist_id, episode, get_backup, rescrape,)))
+        else:
+            self.remainingProviders.remove('animepahe')
+
+        if control.getSetting('provider.hianime') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.hianime_worker, args=(anilist_id, episode, get_backup, rescrape,)))
+        else:
+            self.remainingProviders.remove('h!anime')
+
+        if control.getSetting('provider.animess') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.animess_worker, args=(anilist_id, episode, get_backup, rescrape,)))
+        else:
+            self.remainingProviders.remove('otakuanimes')
+
+        if control.getSetting('provider.animelatino') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.animelatino_worker, args=(anilist_id, episode, get_backup, rescrape,)))
+        else:
+            self.remainingProviders.remove('animelatino')
+
+        if control.getSetting('provider.animecat') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.animecat_worker, args=(anilist_id, episode, get_backup, rescrape,)))
+        else:
+            self.remainingProviders.remove('nekosama')
+
+        if control.getSetting('provider.aniplay') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.aniplay_worker, args=(anilist_id, episode, get_backup, rescrape,)))
+        else:
+            self.remainingProviders.remove('aniplay')
+
+        if control.getSetting('scraping.localInspection') == 'true':
+            self.threads.append(
+                threading.Thread(target=self.user_local_inspection, args=(query, anilist_id, episode, rescrape)))
+        else:
+            self.remainingProviders.remove('Local Inspection')
+
+        self.threads.append(
+            threading.Thread(target=self.user_cloud_inspection, args=(query, anilist_id, episode, media_type, rescrape)))
+
+        cloud_thread = threading.Thread(target=self.user_cloud_inspection, args=(query, anilist_id, episode, media_type, rescrape))
+
+        for i in self.threads:
+            i.start()
+        cloud_thread.start()
 
         self._monitor_scraping_progress(timeout=60 if rescrape else int(control.getSetting('general.timeout')))
+        
+        # Concatenate CocoScrapers sources (already separated)
+        self.torrentCacheSources.extend(source for source in self.cocoscrapers_sources if source['type'] == 'torrent')
+        self.embedSources.extend(source for source in self.cocoscrapers_sources if source['type'] != 'torrent')
 
-        sourcesList = self.sortSources(
-            self.torrentCacheSources + self.torrent_results,  # Combine Otaku and CocoScrapers torrents
-            self.embedSources + self.hoster_results,      # Combine Otaku and CocoScrapers hosters
-            filter_lang, 
-            media_type, 
-            duration
-        )
+        sourcesList = self.sortSources(self.torrentCacheSources, self.embedSources, filter_lang, media_type, duration)
         self.return_data = sourcesList
         self.close()
         return
 
-    def _cocoscrapers_worker(self, query, anilist_id, episode, media_type, rescrape, get_backup):
-        """Calls CocoScrapers and retrieves sources."""
-        try:
-            coco_sources = SourcesCocoScrapers().get_sources(
-                title=query,
-                year=None,  # Extract year from metadata if needed
-                imdb=None,  # Extract IMDb ID from metadata if needed
-                tmdb=None,  # Extract TMDb ID from metadata if needed
-                season=None if media_type == 'movie' else episode,  # Adapt season argument
-                episode=None if media_type == 'movie' else episode,
-                tvshowtitle=query,
-                aliases=[],  # Extract aliases from metadata if available
-                language=self.language,  
-                manual_select=False, 
-                prescrape=False,
-                progress_callback=None  # Use Otaku's UI elements for progress feedback
-            )
-            self.torrent_results.extend(source for source in coco_sources if source['type'] == 'torrent')
-            self.hoster_results.extend(source for source in coco_sources if source['type'] != 'torrent')
-            if self.terminate_on_source and (len(self.torrent_results) > 0 or len(self.hoster_results) > 0):
-                self.remainingProviders.clear()
-        except Exception as e:
-            logger.error(f"Error in _cocoscrapers_worker: {e}")
-        finally:
-            self.remainingProviders.remove(COCO_PROVIDER)  # Update progress
-    #... other workers
     def _monitor_scraping_progress(self, timeout):
-        """
-        Monitors the progress of scraping from various providers, updates the progress bar,
-        and provides visual feedback to the user. Allows early termination if sources are
-        found and the corresponding setting is enabled.
-
-        Args:
-            timeout (int): The maximum time (in seconds) to wait for sources.
-        """
+        """Monitors scraping progress with early termination for CocoScrapers."""
         start_time = time.time()
         runtime = 0
         while runtime < timeout:
             if (self.canceled
-                or len(self.remainingProviders) < 1 and runtime > 5
-                or self.terminate_on_source and (
-                    len(self.torrent_results) > 0
-                    or len(self.hoster_results) > 0
-                    or len(self.cloud_files) > 0
-                    or len(self.local_files) > 0
-                )
+                or len(self.remainingProviders) < 1 and runtime > 5 
+                or self.terminate_on_source and len(self.cocoscrapers_sources) > 0  # <-- Added missing check
                 or self.terminate_on_cloud and len(self.cloud_files) > 0
                 or self.terminate_on_local and len(self.local_files) > 0):
+
                 self.updateProgress()
                 self.setProgress()
                 self.setText("4K: %s | 1080: %s | 720: %s | SD: %s" % (
@@ -118,34 +267,469 @@ class Sources(DisplayWindow):
                 ))
                 time.sleep(.5)
                 break
+            self.updateProgress()
+            self.setProgress()
+            self.setText("4K: %s | 1080: %s | 720: %s | SD: %s" % (
+                control.colorString(self.torrents_qual_len[0] + self.hosters_qual_len[0]),
+                control.colorString(self.torrents_qual_len[1] + self.hosters_qual_len[1]),
+                control.colorString(self.torrents_qual_len[2] + self.hosters_qual_len[2]),
+                control.colorString(self.torrents_qual_len[3] + self.hosters_qual_len[3]),
+            ))
 
-            # ... Rest of the  _monitor_scraping_progress function (progress updating) ...
-Explanation and Adaptations:
+            # Update Progress
+            time.sleep(.5)
+            runtime = (time.perf_counter() if control.PY3 else time.time()) - start_time
+            self.progress = runtime / timeout * 100
+        # Add cloud thread join 
+        cloud_thread.join()
 
-CocoScrapers Integration:
+        if len(self.torrentCacheSources) + len(self.embedSources) + len(self.cloud_files) + len(
+            self.local_files) == 0:
+            self.return_data = []
+            self.close()
+            return
 
-Imports: Import SourcesCocoScrapers from cocoscrapers.sources_cocoscrapers.
-Worker Function: Create _cocoscrapers_worker in the Sources class:
-Instantiates SourcesCocoScrapers and calls its get_sources method with arguments adapted for Otaku's context.
-Extends self.torrent_results and self.hoster_results lists with the results from CocoScrapers.
-Progress Tracking: Add CocoScrapers to self.remainingProviders and remove it when the worker is done.
-Thread Creation: Start a thread for _cocoscrapers_worker in getSources.
-Combining Sources:
+    def _cocoscrapers_worker(self, query, anilist_id, episode, media_type, rescrape, get_backup):
+        """Fetches sources using CocoScrapers."""
+        try:
+            coco_scraper = sources_cocoscrapers.SourcesCocoScrapers() 
 
-In getSources, concatenate the results from Otaku's local providers and CocoScrapers:
-Torrents: self.torrentCacheSources + self.torrent_results
-Hosters/Embeds: self.embedSources + self.hoster_results
-This combined source list is then passed to Otaku's sortSources function for filtering, sorting, and ranking.
-Provider Configuration in Settings: Add a new option (e.g., provider.cocoscrapers) to Otaku's addon settings, which is used in the getSources function to determine whether to start the CocoScrapers worker thread or not.
+            # Extract relevant metadata from Otaku
+            show_meta = database.get_show_meta(anilist_id)
+            if show_meta:
+                show_info = pickle.loads(show_meta.get('kodi_meta'))
+                year = show_info.get('year')
+                imdb_id = show_info.get('imdbnumber')
+                tmdb_id = show_info.get('tmdb_id')
+            else:
+                year = imdb_id = tmdb_id = None
 
-Dependency Management: CocoScrapers is a separate addon with its dependencies. Users of Otaku will need to install CocoScrapers separately for this integration to work. Consider:
+            # Make necessary adjustments for year, season, episode for CocoScrapers compatibility
+            if media_type == 'movie':
+                season = None
+                episode = None
+            else:
+                season = int(episode) 
 
-Providing instructions to users on how to install CocoScrapers.
-Adding a mechanism in Otaku to check if CocoScrapers is installed, and notify the user if it's missing.
-Key Considerations:
+            # Fetch sources from CocoScrapers
+            sources = coco_scraper.get_sources(
+                title=query,
+                year=year,
+                imdb=imdb_id,
+                tmdb=tmdb_id,
+                season=season,
+                episode=episode,
+                tvshowtitle=query,
+                aliases=[],  # Add alias support from Otaku metadata later if needed
+                language=self.language,
+                manual_select=False, 
+                prescrape=False,
+                progress_callback=self._cocoscrapers_progress_callback
+            )
 
-Argument Mapping: The example assumes you've examined both CocoScrapers and Otaku's get_sources function to ensure that the arguments passed to SourcesCocoScrapers.get_sources are correctly mapped. You might need to extract the year, IMDb ID, TMDb ID, or aliases from Otaku's metadata and provide them to CocoScrapers.
-Progress Feedback: The current _cocoscrapers_worker does not use CocoScrapers' progress callback. Integrate Otaku's progress display logic into the callback mechanism of CocoScrapers (if needed) or handle progress within the _monitor_scraping_progress function based on the state of the worker threads.
-Error Handling: Add error handling and retry logic to _cocoscrapers_worker based on Otaku's error handling conventions.
-Threading Issues: Carefully consider potential thread-safety issues. Ensure that lists like self.torrent_results are accessed in a thread-safe way to prevent conflicts between different scraper threads.
-By following these guidelines, you can enhance Otaku to utilize providers from CocoScrapers, expanding the available sources for anime content!
+            #Extend our source list instead of spliting like the example
+            self.cocoscrapers_sources.extend(sources)
+
+        except Exception as e:
+            logging.error(f"Error in CocoScrapers worker: {e}")
+        finally:
+            self.remainingProviders.remove(COCO_PROVIDER)
+            # Signal to stop scraping threads if a source was found and early termination is enabled
+            if self.terminate_on_source and len(self.cocoscrapers_sources) > 0:
+                self.remainingProviders.clear()
+
+    def _cocoscrapers_progress_callback(self, progress, total):
+        """Callback for CocoScrapers to update progress in Otaku's UI."""
+        self.setProgress(int(progress / float(total) * 100))
+        self.setText(f"CocoScrapers: {int(progress / float(total) * 100)}%")
+
+
+    def nyaa_worker(self, query, anilist_id, episode, status, media_type, rescrape):
+        self.nyaaSources = nyaa.sources().get_sources(query, anilist_id, episode, status, media_type, rescrape)
+        self.torrentCacheSources += self.nyaaSources
+        self.remainingProviders.remove('nyaa')
+
+    def animetosho_worker(self, query, anilist_id, episode, status, media_type, rescrape):
+        self.animetoshoSources = animetosho.sources().get_sources(query, anilist_id, episode, status, media_type, rescrape)
+        self.torrentCacheSources += self.animetoshoSources
+        self.remainingProviders.remove('animetosho')
+
+    def anidex_worker(self, query, anilist_id, episode, status, media_type, rescrape):
+        self.anidexSources = anidex.sources().get_sources(query, anilist_id, episode, status, media_type, rescrape)
+        self.torrentCacheSources += self.anidexSources
+        self.remainingProviders.remove('anidex')
+
+    def animeland_worker(self, anilist_id, episode, get_backup, rescrape):
+        if not rescrape:
+            self.animelandSources = animeland.sources().get_sources(anilist_id, episode, get_backup)
+            self.embedSources += self.animelandSources
+        self.remainingProviders.remove('animeland')
+
+    def gogo_worker(self, anilist_id, episode, get_backup, rescrape):
+        if not rescrape:
+            self.gogoSources = gogoanime.sources().get_sources(anilist_id, episode, get_backup)
+            self.embedSources += self.gogoSources
+        self.remainingProviders.remove('gogo')
+        
+    def gogohd_worker(self, anilist_id, episode, get_backup, rescrape):
+        if not rescrape:
+            self.gogohdSources = gogohd.sources().get_sources(anilist_id, episode, get_backup)
+            self.embedSources += self.gogohdSources
+        self.remainingProviders.remove('gogohd')
+
+    def aniwave_worker(self, anilist_id, episode, get_backup, rescrape):
+        if not rescrape:
+            self.aniwaveSources = aniwave.sources().get_sources(anilist_id, episode, get_backup)
+            self.embedSources += self.aniwaveSources
+        self.remainingProviders.remove('aniwave')
+
+    def animixplay_worker(self, anilist_id, episode, get_backup, rescrape):
+        if not rescrape:
+            self.animixplaySources = animixplay.sources().get_sources(anilist_id, episode, get_backup)
+            self.embedSources += self.animixplaySources
+        self.remainingProviders.remove('animix')
+
+    def animepahe_worker(self, anilist_id, episode, get_backup, rescrape):
+        if not rescrape:
+            self.animepaheSources = animepahe.sources().get_sources(anilist_id, episode, get_backup)
+            self.embedSources += self.animepaheSources
+        self.remainingProviders.remove('animepahe')
+
+    def hianime_worker(self, anilist_id, episode, get_backup, rescrape):
+        if not rescrape:
+            self.hianimeSources = hianime.sources().get_sources(anilist_id, episode, get_backup)
+            self.embedSources += self.hianimeSources
+        self.remainingProviders.remove('h!anime')
+
+    def animess_worker(self, anilist_id, episode, get_backup, rescrape):
+        self.animessSources = animess.sources().get_sources(anilist_id, episode, get_backup)
+        self.embedSources += self.animessSources
+        self.remainingProviders.remove('otakuanimes')
+
+    def animelatino_worker(self, anilist_id, episode, get_backup, rescrape):
+        self.animelatinoSources = animelatino.sources().get_sources(anilist_id, episode, get_backup)
+        self.embedSources += self.animelatinoSources
+        self.remainingProviders.remove('animelatino')
+
+    def animecat_worker(self, anilist_id, episode, get_backup, rescrape):
+        self.animecatSources = animecat.sources().get_sources(anilist_id, episode, get_backup)
+        self.embedSources += self.animecatSources
+        self.remainingProviders.remove('nekosama')
+
+    def aniplay_worker(self, anilist_id, episode, get_backup, rescrape):
+        self.aniplaySources = aniplay.sources().get_sources(anilist_id, episode, get_backup)
+        self.embedSources += self.aniplaySources
+        self.remainingProviders.remove('aniplay')
+
+    def user_local_inspection(self, query, anilist_id, episode, rescrape):
+        if not rescrape:
+            self.userlocalSources += local_localfiles.sources().get_sources(query, anilist_id, episode)
+            self.local_files += self.userlocalSources
+        self.remainingProviders.remove('Local Inspection')
+
+    def user_cloud_inspection(self, query, anilist_id, episode, media_type, rescrape):
+        if not rescrape:
+            debrid = {}
+
+            if control.real_debrid_enabled() and control.getSetting('rd.cloudInspection') == 'true':
+                debrid['real_debrid'] = True
+
+            if control.premiumize_enabled() and control.getSetting('premiumize.cloudInspection') == 'true':
+                debrid['premiumize'] = True
+
+            self.usercloudSources = debrid_cloudfiles.sources().get_sources(debrid, query, episode)
+            self.cloud_files += self.usercloudSources
+
+        self.remainingProviders.remove('Cloud Inspection')
+
+    @staticmethod
+    def resolutionList():
+        resolutions = []
+        max_res = int(control.getSetting('general.maxResolution'))
+        if max_res <= 3:
+            resolutions.append('NA')
+            resolutions.append('EQ')
+        if max_res < 3:
+            resolutions.append('720p')
+        if max_res < 2:
+            resolutions.append('1080p')
+        if max_res < 1:
+            resolutions.append('4K')
+
+        return resolutions
+
+    @staticmethod
+    def debrid_priority():
+        p = []
+
+        if control.getSetting('premiumize.enabled') == 'true':
+            p.append({'slug': 'premiumize', 'priority': int(control.getSetting('premiumize.priority'))})
+        if control.getSetting('realdebrid.enabled') == 'true':
+            p.append({'slug': 'real_debrid', 'priority': int(control.getSetting('rd.priority'))})
+        if control.getSetting('alldebrid.enabled') == 'true':
+            p.append({'slug': 'all_debrid', 'priority': int(control.getSetting('alldebrid.priority'))})
+        if control.getSetting('dl.enabled') == 'true':
+            p.append({'slug': 'debrid_link', 'priority': int(control.getSetting('dl.priority'))})
+
+        p.append({'slug': '', 'priority': 11})
+
+        p = sorted(p, key=lambda i: i['priority'])
+
+        return p
+
+    def sortSources(self, torrent_list, embed_list, filter_lang, media_type, duration):
+        sort_method = int(control.getSetting('general.sortsources'))
+
+        sortedList = []
+
+        resolutions = self.resolutionList()
+
+        resolutions.reverse()
+
+        for i in self.cloud_files:
+            sortedList.append(i)
+
+        for i in self.local_files:
+            sortedList.append(i)
+
+        if filter_lang:
+            filter_lang = int(filter_lang)
+            _torrent_list = torrent_list
+
+            torrent_list = [i for i in _torrent_list if i['lang'] != filter_lang]
+
+            embed_list = [i for i in embed_list if i['lang'] != filter_lang]
+
+        filter_option = control.getSetting('general.fileFilter')
+
+        if filter_option == '1':
+            # web speed limit
+            webspeed = int(control.getSetting('general.webspeed'))
+            len_in_sec = int(duration) * 60
+
+            _torrent_list = torrent_list
+            torrent_list = [i for i in _torrent_list if i['size'] != 'NA' and ((float(i['size'][:-3]) * 8000) / len_in_sec) <= webspeed]
+
+        elif filter_option == '2':
+            # hard limit
+            _torrent_list = torrent_list
+
+            if media_type == 'movie':
+                max_GB = float(control.getSetting('general.movie.maxGB'))
+                min_GB = float(control.getSetting('general.movie.minGB'))
+            else:
+                max_GB = float(control.getSetting('general.episode.maxGB'))
+                min_GB = float(control.getSetting('general.episode.minGB'))
+
+            torrent_list = []
+            for i in _torrent_list:
+                if i['size'] != 'NA':
+                    size = float(i['size'][:-3])
+                    unit = i['size'][-2:].strip()
+
+                    if unit == 'MB':
+                        size /= 1024  # convert MB to GB for comparison
+
+                    if min_GB <= size <= max_GB:
+                        torrent_list.append(i)
+
+        if control.getSetting('general.release_title_filter.enabled') == 'true':
+            release_title_filter1 = control.getSetting('general.release_title_filter.value1')
+            release_title_filter2 = control.getSetting('general.release_title_filter.value2')
+            release_title_filter3 = control.getSetting('general.release_title_filter.value3')
+            release_title_filter4 = control.getSetting('general.release_title_filter.value4')
+            release_title_filter5 = control.getSetting('general.release_title_filter.value5')
+        
+            # Get the new settings
+            exclude_filter1 = control.getSetting('general.release_title_filter.exclude1') == 'true'
+            exclude_filter2 = control.getSetting('general.release_title_filter.exclude2') == 'true'
+            exclude_filter3 = control.getSetting('general.release_title_filter.exclude3') == 'true'
+            exclude_filter4 = control.getSetting('general.release_title_filter.exclude4') == 'true'
+            exclude_filter5 = control.getSetting('general.release_title_filter.exclude5') == 'true'
+        
+            _torrent_list = torrent_list
+            release_title_logic = control.getSetting('general.release_title_filter.logic')
+            if release_title_logic == '0':
+                # AND filter
+                torrent_list = [i for i in _torrent_list if 
+                                (not exclude_filter1 or release_title_filter1 not in i['release_title']) and 
+                                (not exclude_filter2 or release_title_filter2 not in i['release_title']) and 
+                                (not exclude_filter3 or release_title_filter3 not in i['release_title']) and 
+                                (not exclude_filter4 or release_title_filter4 not in i['release_title']) and 
+                                (not exclude_filter5 or release_title_filter5 not in i['release_title'])]
+            if release_title_logic == '1':
+                # OR filter
+                torrent_list = [i for i in _torrent_list if 
+                                (release_title_filter1 != "" and (exclude_filter1 ^ (release_title_filter1 in i['release_title']))) or 
+                                (release_title_filter2 != "" and (exclude_filter2 ^ (release_title_filter2 in i['release_title']))) or 
+                                (release_title_filter3 != "" and (exclude_filter3 ^ (release_title_filter3 in i['release_title']))) or 
+                                (release_title_filter4 != "" and (exclude_filter4 ^ (release_title_filter4 in i['release_title']))) or 
+                                (release_title_filter5 != "" and (exclude_filter5 ^ (release_title_filter5 in i['release_title'])))]
+
+        # Get the value of the 'sourcesort.menu' setting
+        sort_option = control.getSetting('general.sourcesort')
+
+        # Apply sorting based on the selected option
+        if sort_option == 'Sub':
+            # Sort by dubs (modified code)
+            torrent_list = sorted(torrent_list, key=lambda x: x['lang'] == 0, reverse=True)
+            embed_list = sorted(embed_list, key=lambda x: x['lang'] == 0, reverse=True)
+        elif sort_option == 'Dub':
+            # Sort by subs (original code)
+            torrent_list = sorted(torrent_list, key=lambda x: x['lang'] > 0, reverse=True)
+            embed_list = sorted(embed_list, key=lambda x: x['lang'] > 0, reverse=True)
+        else:
+            # No sorting needed (default behavior)
+            pass
+
+        prioritize_dualaudio = False
+        prioritize_multisubs = False
+        prioritize_batches = False
+        prioritize_season = False
+        prioritize_part = False
+        prioritize_episode = False 
+        prioritize_consistently = False
+        keyword = None
+
+        if control.getSetting('general.sortsources') == '0':  # Torrents selected
+            prioritize_dualaudio = control.getSetting('general.prioritize_dualaudio') == 'true'
+            prioritize_multisubs = control.getSetting('general.prioritize_multisubs') == 'true'
+            prioritize_batches = control.getSetting('general.prioritize_batches') == 'true'
+            prioritize_consistently = control.getSetting('consistent.torrentInspection') == 'true'
+   
+            if prioritize_consistently:
+                prioritize_season = control.getSetting('consistent.prioritize_season') == 'true'
+                prioritize_part = control.getSetting('consistent.prioritize_part') == 'true'
+                prioritize_episode = control.getSetting('consistent.prioritize_episode') == 'true'
+            else:
+                prioritize_season = control.getSetting('general.prioritize_season') == 'true'
+                prioritize_part = control.getSetting('general.prioritize_part') == 'true'
+                prioritize_episode = control.getSetting('general.prioritize_episode') == 'true'
+            
+            from itertools import chain, combinations
+    
+            # Define the order of the keys
+            key_order = ['SEASON', 'PART', 'EPISODE', 'DUAL-AUDIO', 'MULTI-SUBS', 'BATCH']
+    
+            # Define the user's selected priorities
+            selected_priorities = [prioritize_season, prioritize_part, prioritize_episode, prioritize_dualaudio, prioritize_multisubs, prioritize_batches]
+    
+            # Generate all possible combinations of the selected priorities
+            selected_combinations = list(chain(*map(lambda x: combinations([key for key, selected in zip(key_order, selected_priorities) if selected], x), range(0, len(selected_priorities)+1))))
+    
+            # Initialize keyword as an empty list
+            keyword = []
+            
+            for combination in selected_combinations:
+                # Skip the empty combination
+                if not combination:
+                    continue
+            
+                # Join the keys in the combination with '_OR_' and append to the keyword list
+                keyword.append('_OR_'.join(combination))
+            
+            # Keep only the last combination in the keyword list
+            keyword = [keyword[-1]] if keyword else []
+            
+            # Convert the keyword list to a string
+            keyword = ' '.join(keyword) if keyword else ''
+
+        debrid_priorities = self.debrid_priority()
+
+        if keyword:
+            # Filter the torrent list based on the keyword
+            torrent_list_filtered = [i for i in torrent_list if keyword in i['info']]
+            torrent_list_not_filtered = [i for i in torrent_list if keyword not in i['info']]
+
+            # Sort and append torrents based on resolution and debrid provider
+            for resolution in resolutions:
+                for debrid in self.debrid_priority():
+                    for torrent in torrent_list_filtered:
+                        if debrid['slug'] == torrent['debrid_provider'] and torrent['quality'] == resolution:
+                            sortedList.append(torrent)
+                    for torrent in torrent_list_not_filtered:
+                        if debrid['slug'] == torrent['debrid_provider'] and torrent['quality'] == resolution:
+                            sortedList.append(torrent)
+                # Append files from embed_list based on resolution
+                for file in embed_list:
+                    if file['quality'] == resolution:
+                        sortedList.append(file)
+        else:
+            # Sort Souces Medthod: Torrents
+            # Torrents: Sub or Dub
+            # - Helps Gets Torrents
+            if sort_method == 0 or sort_method == 2:
+                for resolution in resolutions:
+                    for debrid in debrid_priorities:
+                        for torrent in torrent_list:
+                            if debrid['slug'] == torrent['debrid_provider']:
+                                if torrent['quality'] == resolution:
+                                    sortedList.append(torrent)
+
+            # Sort Souces Medthod: Embeds
+            # Emebeds: Dual Audio or Dub
+            # - Helps Gets Embeds
+            if sort_method == 1 or sort_method == 2:
+                for resolution in resolutions:
+                    for file in embed_list:
+                        if file['quality'] == resolution:
+                            sortedList.append(file)
+
+            # Sort Souces Medthod: Embeds
+            # Torrents: Dual Audio
+            # - Helps Gets Torrents
+            if sort_method == 1:
+                for resolution in resolutions:
+                    for debrid in debrid_priorities:
+                        for torrent in torrent_list:
+                            if torrent['debrid_provider'] == debrid['slug']:
+                                if torrent['quality'] == resolution:
+                                    sortedList.append(torrent)
+
+            # Sort Souces Medthod: Torrents
+            # Emebeds: Sub
+            # - Helps Gets Embeds
+            if sort_method == 0:
+                for resolution in resolutions:
+                    for file in embed_list:
+                        if file['quality'] == resolution:
+                            sortedList.append(file)
+
+        if control.getSetting('torrent.disable265') == 'true':
+            sortedList = [i for i in sortedList if 'HEVC' not in i['info']]
+
+        if control.getSetting('torrent.batch') == 'true':
+            sortedList = [i for i in sortedList if 'BATCH' not in i['info']]
+
+        preferences = control.getSetting("general.source")
+        lang_preferences = {'Dub': 0, 'Sub': 2}
+        if preferences in lang_preferences:
+            sortedList = [i for i in sortedList if i['lang'] != lang_preferences[preferences]]
+
+        return sortedList
+
+    @staticmethod
+    def colorNumber(number):
+        return control.colorString(number, 'green') if int(number) > 0 else control.colorString(number, 'red')
+
+    def updateProgress(self):
+
+        list1 = [
+            len([i for i in self.nyaaSources if i['quality'] == '4K']),
+            len([i for i in self.nyaaSources if i['quality'] == '1080p']),
+            len([i for i in self.nyaaSources if i['quality'] == '720p']),
+            len([i for i in self.nyaaSources if i['quality'] == 'NA']),
+        ]
+
+        self.torrents_qual_len = list1
+
+        list2 = [
+            len([i for i in self.embedSources if i['quality'] == '4K']),
+            len([i for i in self.embedSources if i['quality'] == '1080p']),
+            len([i for i in self.embedSources if i['quality'] == '720p']),
+            len([i for i in self.embedSources if i['quality'] == 'NA']),
+        ]
+
+        self.hosters_qual_len = list2
+
+        return
