@@ -9,7 +9,6 @@ from resources.lib.pages import nyaa, animetosho, anidex, animeland, animixplay,
 from resources.lib.ui import control
 from resources.lib.windows.get_sources_window import GetSources as DisplayWindow
 from resources.lib.common import logger, tools
-from resources.lib.modules.globals import g
 
 # CocoScrapers Imports
 from cocoscrapers.sources_cocoscrapers import SourcesCocoScrapers
@@ -38,7 +37,7 @@ class Sources(DisplayWindow):
 
         self.cocoscrapers_sources = []
         self.remainingProviders.append(COCO_PROVIDER)
-        self.terminate_on_source = g.get_bool_setting('general.terminate.onsource')
+        self.terminate_on_source = control.getsetting('general.terminate.onsource')
 
     def getSources(self, args):
         # ... [Argument fetching code remains the same] ...
