@@ -3,7 +3,6 @@ import time
 import xbmcaddon
 
 from resources.lib.common import logger, tools
-from resources.lib.modules.globals import g
 from resources.lib.windows.get_sources_window import GetSources as DisplayWindow
 
 #CocoScrapers Imports
@@ -31,7 +30,7 @@ class Sources(DisplayWindow):
         self.torrent_results = []  # Collect CocoScrapers torrent results
         self.hoster_results = []  # Collect CocoScrapers hoster results
         self.remainingProviders = ['CocoScrapers']  # For progress monitoring
-        self.terminate_on_source = g.get_bool_setting('general.terminate.onsource')
+        self.terminate_on_source = control.getsetting('general.terminate.onsource')
 
         # ... other init code  ...
 
