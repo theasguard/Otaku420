@@ -1,5 +1,7 @@
 import threading
 import time
+import pickle  # Import pickle for handling kodi_meta
+
 
 from resources.lib.pages import nyaa, animetosho, anidex, animeland, animixplay, debrid_cloudfiles, \
     aniwave, gogoanime, gogohd, animepahe, hianime, animess, animelatino, animecat, aniplay, \
@@ -8,7 +10,9 @@ from resources.lib.ui import control
 from resources.lib.windows.get_sources_window import GetSources as DisplayWindow
 
 # CocoScrapers Imports
-from cocoscrapers import sources_cocoscrapers
+from cocoscrapers import sources as sources_cocoscrapers 
+
+COCO_PROVIDER = 'CocoScrapers'
 
 import logging
 
@@ -32,8 +36,6 @@ def getSourcesHelper(actionArgs):
     except:
         pass
     return sources
-
-COCO_PROVIDER = 'CocoScrapers'
 
 class Sources(DisplayWindow):
     def __init__(self, xml_file, location, actionArgs=None):
@@ -59,6 +61,8 @@ class Sources(DisplayWindow):
             'animepahe', 'h!anime', 'otakuanimes', 'animelatino',
             'nekosama', 'aniplay', 'Local Inspection', 'Cloud Inspection'
         ]
+        self.cocoscrapers_sources = []
+        self.remainingProviders.append(COCO_PROVIDER) # CocoScrapers is now in remainingProviders 
         self.allTorrents = {}
         self.allTorrents_len = 0
         self.hosterDomains = {}
@@ -100,13 +104,11 @@ class Sources(DisplayWindow):
         self.threads = []
         self.usercloudSources = []
         self.userlocalSources = []
-        self.terminate_on_cloud = control.getSetting('general.terminate.oncloud') == 'true'
-        self.terminate_on_local = control.getSetting('general.terminate.onlocal') == 'true'
         self.torrent_results = []  # Collect CocoScrapers torrent results
         self.hoster_results = []  # Collect CocoScrapers hoster results
-        self.cocoscrapers_sources = []
-        self.remainingProviders.append(COCO_PROVIDER)
-        self.terminate_on_source = control.getSetting('general.terminate.onsource')
+        self.terminate_on_cloud = control.getSetting('general.terminate.oncloud') == 'true'
+        self.terminate_on_local = control.getSetting('general.terminate.onlocal') == 'true'
+        self.terminate_on_source = control.getSetting('general.terminate.onsource') == 'true'
 
 
     def getSources(self, args):
@@ -128,7 +130,7 @@ class Sources(DisplayWindow):
                                  args=(query, anilist_id, episode, media_type, rescrape, get_backup))
             )
         else:
-            self.remainingProviders.remove(COCO_PROVIDER) 
+            self.remainingProviders.remove(COCO_PROVIDER)  # If not enabled, remove it
 
         if control.real_debrid_enabled() or control.all_debrid_enabled() or control.debrid_link_enabled() or control.premiumize_enabled():
             if control.getSetting('provider.nyaa') == 'true':
@@ -233,23 +235,13 @@ class Sources(DisplayWindow):
 
         for i in self.threads:
             i.start()
+
         cloud_thread.start()
 
-        self._monitor_scraping_progress(timeout=60 if rescrape else int(control.getSetting('general.timeout')))
-        
-        # Concatenate CocoScrapers sources (already separated)
-        self.torrentCacheSources.extend(source for source in self.cocoscrapers_sources if source['type'] == 'torrent')
-        self.embedSources.extend(source for source in self.cocoscrapers_sources if source['type'] != 'torrent')
-
-        sourcesList = self.sortSources(self.torrentCacheSources, self.embedSources, filter_lang, media_type, duration)
-        self.return_data = sourcesList
-        self.close()
-        return
-
-    def _monitor_scraping_progress(self, timeout):
-        """Monitors scraping progress with early termination for CocoScrapers."""
-        start_time = time.time()
+        timeout = 60 if rescrape else int(control.getSetting('general.timeout'))
+        start_time = time.perf_counter() if control.PY3 else time.time()
         runtime = 0
+
         while runtime < timeout:
             if (self.canceled
                 or len(self.remainingProviders) < 1 and runtime > 5 
@@ -280,8 +272,11 @@ class Sources(DisplayWindow):
             time.sleep(.5)
             runtime = (time.perf_counter() if control.PY3 else time.time()) - start_time
             self.progress = runtime / timeout * 100
+
         # Add cloud thread join 
         cloud_thread.join()
+
+        self._combine_sources() #Combine sources
 
         if len(self.torrentCacheSources) + len(self.embedSources) + len(self.cloud_files) + len(
             self.local_files) == 0:
@@ -289,59 +284,111 @@ class Sources(DisplayWindow):
             self.close()
             return
 
-    def _cocoscrapers_worker(self, query, anilist_id, episode, media_type, rescrape, get_backup):
-        """Fetches sources using CocoScrapers."""
-        try:
-            coco_scraper = sources_cocoscrapers.SourcesCocoScrapers() 
-
-            # Extract relevant metadata from Otaku
-            show_meta = database.get_show_meta(anilist_id)
-            if show_meta:
-                show_info = pickle.loads(show_meta.get('kodi_meta'))
-                year = show_info.get('year')
-                imdb_id = show_info.get('imdbnumber')
-                tmdb_id = show_info.get('tmdb_id')
-            else:
-                year = imdb_id = tmdb_id = None
-
-            # Make necessary adjustments for year, season, episode for CocoScrapers compatibility
-            if media_type == 'movie':
-                season = None
-                episode = None
-            else:
-                season = int(episode) 
-
-            # Fetch sources from CocoScrapers
-            sources = coco_scraper.get_sources(
-                title=query,
-                year=year,
-                imdb=imdb_id,
-                tmdb=tmdb_id,
-                season=season,
-                episode=episode,
-                tvshowtitle=query,
-                aliases=[],  # Add alias support from Otaku metadata later if needed
-                language=self.language,
-                manual_select=False, 
-                prescrape=False,
-                progress_callback=self._cocoscrapers_progress_callback
-            )
-
-            #Extend our source list instead of spliting like the example
-            self.cocoscrapers_sources.extend(sources)
-
-        except Exception as e:
-            logging.error(f"Error in CocoScrapers worker: {e}")
-        finally:
-            self.remainingProviders.remove(COCO_PROVIDER)
-            # Signal to stop scraping threads if a source was found and early termination is enabled
-            if self.terminate_on_source and len(self.cocoscrapers_sources) > 0:
-                self.remainingProviders.clear()
+        sourcesList = self.sortSources(self.torrentCacheSources, self.embedSources, filter_lang, media_type, duration)
+        self.return_data = sourcesList
+        self.close()
+        return
 
     def _cocoscrapers_progress_callback(self, progress, total):
         """Callback for CocoScrapers to update progress in Otaku's UI."""
         self.setProgress(int(progress / float(total) * 100))
         self.setText(f"CocoScrapers: {int(progress / float(total) * 100)}%")
+
+    def _cocoscrapers_worker(self, query, anilist_id, episode, media_type, rescrape, get_backup):
+        """Fetches sources using CocoScrapers."""
+        try:
+            # --- Get a list of enabled CocoScrapers providers ---
+            enabled_cocoscrapers_providers = sources_cocoscrapers.sources()
+
+            # --- Prepare metadata ---
+            show_info = self._get_show_info(anilist_id)
+            title = show_info.get('ename') or show_info.get('name')
+            year = show_info.get('year')
+            imdb_id = show_info.get('imdbnumber')
+            tvdb_id = show_info.get('tvdb_id')
+            aliases = show_info.get('aliases', [])
+
+            if media_type == 'movie':
+                season = episode = tvshowtitle = None
+                coco_data = {
+                    'imdb': imdb_id,
+                    'title': title,
+                    'aliases': aliases,
+                    'year': year,
+                }
+            else:
+                season = episode = int(episode)
+                tvshowtitle = title
+                coco_data = {
+                    'imdb': imdb_id,
+                    'tvdb': tvdb_id,  # Include TVDb ID
+                    'tvshowtitle': tvshowtitle,
+                    'aliases': aliases,
+                    'year': year,
+                    'title': episode,     
+                    'season': str(season),
+                    'episode': str(episode) 
+                }
+
+            # --- Call each enabled provider ---
+            for provider_name, provider_module in enabled_cocoscrapers_providers:
+                logging.debug(f"Trying CocoScrapers provider: {provider_name}")
+                try:
+                    # Get sources using the provider
+                    sources = provider_module().sources(coco_data, {})
+                    self.cocoscrapers_sources.extend(sources)
+
+                except Exception as e:
+                    logging.error(f"Error calling CocoScrapers provider {provider_name}: {e}")
+
+        except Exception as e:
+            logging.error(f"Error in CocoScrapers worker: {e}")
+        finally:
+            self.remainingProviders.remove(COCO_PROVIDER)
+
+            # Stop other threads if needed
+            if self.terminate_on_source and len(self.cocoscrapers_sources) > 0:
+                self.remainingProviders.clear()
+
+    def _get_coco_sources(self, coco_scraper, title, year, imdb_id, tmdb_id, season, episode, tvshowtitle, aliases, language):
+        """Fetches sources using a specific CocoScraper."""
+        try:
+            # Get sources using the provided scraper instance.
+            sources = coco_scraper().get_sources(
+                title=title,  # Use the extracted title
+                year=year,
+                imdb=imdb_id,
+                tmdb=tmdb_id,
+                season=season,
+                episode=episode,
+                tvshowtitle=tvshowtitle,  # Pass TV show title for episodes
+                aliases=aliases,  # Pass aliases
+                language=language,
+                manual_select=False,
+                prescrape=False,  # This might not be needed
+                progress_callback=self._cocoscrapers_progress_callback,
+            )
+
+            # Extend the list of sources with the sources found by this scraper.
+            self.cocoscrapers_sources.extend(sources)
+        except Exception as e:
+            logging.error(f'Error in get coco sources: {e}')
+
+    def _combine_sources(self):
+        """Combine the sources found by CocoScrapers."""
+        for source in self.cocoscrapers_sources:
+            if source['type'] == 'torrent':
+                self.torrentCacheSources.append(source)
+            else:
+                self.embedSources.append(source)
+
+    def _get_show_info(self, anilist_id):
+        """Helper function to retrieve and handle show metadata from Otaku."""
+        show = database.get_show(anilist_id)
+        if show:
+            kodi_meta = pickle.loads(show.get('kodi_meta'))
+            return kodi_meta  
+        return {} 
 
 
     def nyaa_worker(self, query, anilist_id, episode, status, media_type, rescrape):
