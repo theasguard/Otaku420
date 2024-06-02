@@ -1,0 +1,6 @@
+{
+    "python.analysis.extraPaths": [
+        "./script.module.cocoscrapers/lib",
+        "./script.module.cocoscrapers/lib/cocoscrapers/sources_"
+    ]
+}
